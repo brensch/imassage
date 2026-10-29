@@ -1,0 +1,37 @@
+# Non-secret Synapse config. Secrets (database password, macaroon/form/registration secrets)
+# are in data/synapse/secrets.yaml, written by setup.sh and passed as a second --config-path.
+#
+# This homeserver exists only to carry the iMessage bridge: no federation, no open registration,
+# reachable only from the LAN and WireGuard through the homelab Caddy.
+
+server_name: matrix.brensch.com
+public_baseurl: https://matrix.brensch.com/
+pid_file: /data/homeserver.pid
+signing_key_path: /data/signing.key
+media_store_path: /data/media_store
+log_config: /config/log.config
+report_stats: false
+
+listeners:
+  - port: 8008
+    type: http
+    tls: false
+    bind_addresses: ["0.0.0.0"]
+    x_forwarded: true
+    resources:
+      - names: [client]
+        compress: false
+
+# Federation off: nobody else's server can talk to this one, and it fetches no keys.
+federation_domain_whitelist: []
+trusted_key_servers: []
+suppress_key_server_warning: true
+allow_public_rooms_over_federation: false
+
+enable_registration: false
+url_preview_enabled: false
+max_upload_size: 100M
+
+app_service_config_files:
+  - /appservices/imessage.yaml
+  - /data/doublepuppet.yaml
