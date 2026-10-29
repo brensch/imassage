@@ -1,0 +1,54 @@
+diff --git a/pkg/rustpushgo/src/anisette.rs b/pkg/rustpushgo/src/anisette.rs
+index 4fdce05..a70044a 100644
+--- a/pkg/rustpushgo/src/anisette.rs
++++ b/pkg/rustpushgo/src/anisette.rs
+@@ -59,6 +59,13 @@ impl AnisetteProvider for BridgeAnisetteProvider {
+     ) -> impl std::future::Future<Output = Result<HashMap<String, String>, AnisetteError>> + Send
+     {
+         async move {
++            // imassage patch: Apple rejects logins made with anisette from the public remote
++            // servers since Oct 2026 (-80045). With ANISETTE_MAC_URL set, headers come from a
++            // real Mac's AOSKit instead (imassage/mac-anisette) and the remote path is unused.
++            if let Ok(url) = std::env::var("ANISETTE_MAC_URL") {
++                return mac_anisette_headers(&url).await;
++            }
++
+             let mut last_err = None;
+             let call_start = std::time::Instant::now();
+ 
+@@ -165,3 +172,35 @@ impl AnisetteProvider for BridgeAnisetteProvider {
+         }
+     }
+ }
++
++/// Fetch headers from the imassage Mac anisette service: GET with a bearer token, JSON map back.
++async fn mac_anisette_headers(url: &str) -> Result<HashMap<String, String>, AnisetteError> {
++    let token = std::env::var("ANISETTE_MAC_TOKEN").unwrap_or_default();
++    let client = reqwest::Client::builder()
++        .timeout(Duration::from_secs(15))
++        .build()
++        .map_err(|e| AnisetteError::InvalidArgument(format!("mac anisette client: {e}")))?;
++    let mut last_err = String::new();
++    for attempt in 0..MAX_RETRIES {
++        let result = match client.get(url).bearer_auth(&token).send().await {
++            Ok(resp) => match resp.error_for_status() {
++                Ok(resp) => resp.json::<HashMap<String, String>>().await.map_err(|e| e.to_string()),
++                Err(e) => Err(e.to_string()),
++            },
++            Err(e) => Err(e.to_string()),
++        };
++        match result {
++            Ok(headers) => {
++                info!("anisette: got headers from Mac on attempt {}/{}", attempt + 1, MAX_RETRIES);
++                return Ok(headers);
++            }
++            Err(e) => {
++                warn!("anisette: Mac attempt {}/{} failed: {}", attempt + 1, MAX_RETRIES, e);
++                last_err = e;
++                tokio::time::sleep(Duration::from_secs(2)).await;
++            }
++        }
++    }
++    error!("anisette: Mac anisette unavailable after {} attempts", MAX_RETRIES);
++    Err(AnisetteError::InvalidArgument(format!("Mac anisette unavailable: {last_err}")))
++}

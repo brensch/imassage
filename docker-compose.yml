@@ -66,8 +66,8 @@ services:
     logging: *logging
 
   bridge:
-    # Pinned by digest; bump on purpose (see README).
-    image: ghcr.io/jasonlaguidice/imessage@sha256:cd80d55655927b27e0c743d60efe835683050ae415ac826dd5e7c3c6bbb59a44
+    # Built locally by bridge/build.sh: upstream at a pinned commit plus bridge/*.patch.
+    image: imassage-bridge:595ce7e-mac
     container_name: imessage-bridge
     restart: unless-stopped
     user: "${UID}:${GID}"
@@ -75,6 +75,9 @@ services:
       XDG_DATA_HOME: /state
       HOME: /state
       TZ: America/Los_Angeles
+      # Anisette from the Mac mini's AOSKit (mac-anisette/), not the public servers.
+      ANISETTE_MAC_URL: ${ANISETTE_MAC_URL}
+      ANISETTE_MAC_TOKEN: ${ANISETTE_MAC_TOKEN}
     volumes:
       - ./data/bridge:/data
       - ./data/bridge-state:/state

@@ -27,7 +27,8 @@ Element ──https──▶ homelab Caddy ──▶ imessage-synapse ◀──a
 
 ```sh
 git clone https://github.com/brensch/imassage.git ~/imassage && cd ~/imassage
-./setup.sh
+./bridge/build.sh
+./setup.sh      # then add the ANISETTE_MAC_* lines to .env (below)
 docker compose up -d
 docker exec -it imessage-synapse register_new_matrix_user -c /data/secrets.yaml -a http://localhost:8008
 ```
@@ -40,6 +41,30 @@ Plus, once per domain:
 
 The Matrix login on snek3 is in `~/.config/imessage/matrix_login`.
 
+## Anisette from the Mac mini
+
+Apple ID logins need "anisette" headers that prove a real Apple device. Since Oct 12 2026 Apple
+rejects the ones from the public remote servers the bridge uses (`-80045`, before the password is
+even checked; it broke AltStore/SideStore/iLoader too). Headers from a real Mac still work. So
+the Mac mini (192.168.1.11, a DHCP reservation on the router) runs `mac-anisette/anisette_server.py`,
+a launchd agent serving its AOSKit headers on port 6969 behind a bearer token. `bridge/mac-anisette.patch`
+makes the bridge fetch from there when `ANISETTE_MAC_URL` is set.
+
+Plain iMessage traffic (APNs/IDS) doesn't use anisette. Login, 2FA and the iCloud token refreshes
+(contacts, CloudKit) do, so the Mac has to be reachable for those.
+
+Mac side (Catalina's stock `/usr/bin/python` 2.7 + PyObjC, nothing to install):
+
+```sh
+mkdir -p ~/imassage-anisette && cp mac-anisette/anisette_server.py ~/imassage-anisette/
+python3 -c 'import secrets;print(secrets.token_urlsafe(32))' > ~/.imassage-anisette-token   # (any random string)
+sed "s#__HOME__#$HOME#g" mac-anisette/com.brensch.imassage-anisette.plist > ~/Library/LaunchAgents/com.brensch.imassage-anisette.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.brensch.imassage-anisette.plist
+```
+
+snek3 side: `ANISETTE_MAC_URL=http://192.168.1.11:6969/` and `ANISETTE_MAC_TOKEN=<same token>` in `.env`,
+and the image built by `bridge/build.sh` (upstream at a pinned commit plus `bridge/*.patch`).
+
 ## Hardware key (one time)
 
 On the Intel Mac (macOS 13+ for the CLI; otherwise build `tools/extract-key-app`):
@@ -49,7 +74,12 @@ git clone https://github.com/jasonlaguidice/imessage.git && cd imessage
 go run tools/extract-key/main.go
 ```
 
-It prints a base64 key. Treat it like a password: anyone holding it can register iMessage as
+(The mini is stuck on Catalina with no Xcode tools, so this key was instead built from stock
+`ioreg -a -c IOPlatformExpertDevice`, `nvram -x <GUID>:ROM/MLB`, `diskutil info -plist /`,
+`sysctl`/`sw_vers`/`ifconfig` output, in the same JSON the Go tool emits. Catalina doesn't
+expose the five `_enc` IOKit properties; the bridge computes them on Linux.)
+
+It prints a base64 key, stored on snek3 at `~/.config/imessage/hardware_key`. Treat it like a password: anyone holding it can register iMessage as
 that Mac, and abuse gets the hardware banned. Keep the Mac in a drawer, not the bin, in case a
 re-extraction is ever needed.
 
@@ -73,8 +103,9 @@ docker compose logs -f bridge          # the thing most likely to need a look
 docker compose pull && docker compose up -d   # after bumping an image pin
 ```
 
-The bridge image is pinned by digest. To update it: `docker pull ghcr.io/jasonlaguidice/imessage:latest`,
-read the upstream commits since the current pin, put the new digest in `docker-compose.yml`, `up -d`.
+The bridge image is built locally. To update it: read the upstream commits since `COMMIT` in
+`bridge/build.sh`, bump it (check the patch still applies), run `bridge/build.sh`, put the new tag
+in `docker-compose.yml`, `up -d`.
 Apple-side breakage gets fixed upstream (OpenBubbles' rustpush first, then this bridge), so a
 sudden failure across the board usually means waiting for and pulling a new image.
 
